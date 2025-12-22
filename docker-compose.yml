@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: proxy-sql-postgres
+    environment:
+      POSTGRES_USER: sqlproxy
+      POSTGRES_PASSWORD: sqlproxy_password
+      POSTGRES_DB: testdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sqlproxy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    container_name: proxy-sql-api
+    environment:
+      DATABASE_URL: postgresql://sqlproxy:sqlproxy_password@postgres:5432/testdb
+      API_HOST: 0.0.0.0
+      API_PORT: 18790
+      LOG_LEVEL: INFO
+    ports:
+      - "18790:18790"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
