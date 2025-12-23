@@ -30,9 +30,9 @@ PoolDep = Annotated[DatabaseConnectionPool, Depends(get_database_pool)]
 
 
 # Repository dependency
-def get_repository(pool: PoolDep) -> PostgreSQLRepository:
+def get_repository(pool: PoolDep, settings: SettingsDep) -> PostgreSQLRepository:
     """FastAPI dependency for database repository."""
-    return PostgreSQLRepository(pool)
+    return PostgreSQLRepository(pool, schema=settings.db_schema)
 
 
 RepositoryDep = Annotated[PostgreSQLRepository, Depends(get_repository)]

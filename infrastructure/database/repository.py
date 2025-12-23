@@ -11,8 +11,9 @@ from infrastructure.exceptions.database_exceptions import QueryExecutionError, T
 class PostgreSQLRepository:
     """PostgreSQL implementation of DatabaseRepositoryProtocol."""
 
-    def __init__(self, pool: DatabaseConnectionPool) -> None:
+    def __init__(self, pool: DatabaseConnectionPool, schema: str = "public") -> None:
         self._pool = pool
+        self._schema = schema
 
     async def get_tables(  # type: ignore[return]
         self, pagination: Pagination
@@ -36,10 +37,10 @@ class PostgreSQLRepository:
                 obj_description(c.oid, 'pg_class') AS table_comment
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname = 'public'
+            WHERE n.nspname = $1
               AND c.relkind IN ('r', 'v', 'm')
             ORDER BY c.relname
-            LIMIT $1 OFFSET $2
+            LIMIT $2 OFFSET $3
         """
 
         # Count query
@@ -47,16 +48,18 @@ class PostgreSQLRepository:
             SELECT count(*)
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname = 'public'
+            WHERE n.nspname = $1
               AND c.relkind IN ('r', 'v', 'm')
         """
 
         async for conn in self._pool.acquire():
             # Get total count
-            total_count = await conn.fetchval(count_query)
+            total_count = await conn.fetchval(count_query, self._schema)
 
             # Get paginated tables
-            rows = await conn.fetch(tables_query, pagination.page_size, pagination.offset)
+            rows = await conn.fetch(
+                tables_query, self._schema, pagination.page_size, pagination.offset
+            )
 
             tables = [
                 TableInfo(
@@ -81,7 +84,7 @@ class PostgreSQLRepository:
             SELECT EXISTS (
                 SELECT 1 FROM pg_class c
                 JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE n.nspname = 'public' AND c.relname = $1
+                WHERE n.nspname = $1 AND c.relname = $2
             )
         """
 
@@ -90,7 +93,7 @@ class PostgreSQLRepository:
             SELECT obj_description(c.oid, 'pg_class') AS table_comment
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname = 'public' AND c.relname = $1
+            WHERE n.nspname = $1 AND c.relname = $2
         """
 
         # Get columns
@@ -116,8 +119,8 @@ class PostgreSQLRepository:
             FROM pg_attribute a
             JOIN pg_class c ON a.attrelid = c.oid
             JOIN pg_namespace n ON c.relnamespace = n.oid
-            WHERE n.nspname = 'public'
-              AND c.relname = $1
+            WHERE n.nspname = $1
+              AND c.relname = $2
               AND a.attnum > 0
               AND NOT a.attisdropped
             ORDER BY a.attnum
@@ -135,21 +138,23 @@ class PostgreSQLRepository:
             JOIN pg_class i ON i.oid = ix.indexrelid
             JOIN pg_namespace n ON t.relnamespace = n.oid
             JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
-            WHERE n.nspname = 'public' AND t.relname = $1
+            WHERE n.nspname = $1 AND t.relname = $2
             GROUP BY i.relname, ix.indisunique, ix.indisprimary
         """
 
         async for conn in self._pool.acquire():
             # Check existence
-            exists = await conn.fetchval(exists_query, table_name)
+            exists = await conn.fetchval(exists_query, self._schema, table_name)
             if not exists:
-                raise TableNotFoundError(f"Table '{table_name}' not found")
+                raise TableNotFoundError(
+                    f"Table '{table_name}' not found in schema '{self._schema}'"
+                )
 
             # Get table comment
-            table_comment = await conn.fetchval(comment_query, table_name)
+            table_comment = await conn.fetchval(comment_query, self._schema, table_name)
 
             # Get columns
-            column_rows = await conn.fetch(columns_query, table_name)
+            column_rows = await conn.fetch(columns_query, self._schema, table_name)
             columns = [
                 ColumnInfo(
                     column_name=row["column_name"],
@@ -164,7 +169,7 @@ class PostgreSQLRepository:
             ]
 
             # Get indexes
-            index_rows = await conn.fetch(indexes_query, table_name)
+            index_rows = await conn.fetch(indexes_query, self._schema, table_name)
             indexes = [
                 IndexInfo(
                     index_name=row["index_name"],

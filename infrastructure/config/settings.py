@@ -14,6 +14,10 @@ class Settings(BaseSettings):
         description="PostgreSQL connection URL",
         examples=["postgresql://user:pass@localhost:5432/dbname"],
     )
+    db_schema: str = Field(
+        default="public",
+        description="PostgreSQL schema name to use for queries",
+    )
 
     # Connection pool settings
     db_pool_min_size: int = Field(default=5, ge=1, le=100)
